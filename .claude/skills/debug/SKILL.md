@@ -10,11 +10,11 @@ This guide covers debugging the containerized agent execution system.
 ## Architecture Overview
 
 ```
-Host (macOS)                          Container (Linux VM)
+Host (macOS/Linux)                    Container (Docker)
 ─────────────────────────────────────────────────────────────
 src/container-runner.ts               container/agent-runner/
     │                                      │
-    │ spawns container                      │ runs Claude Agent SDK
+    │ spawns Docker container              │ runs Claude Agent SDK
     │ with volume mounts                   │ with MCP servers
     │                                      │
     ├── data/env/env ──────────────> /workspace/env-dir/env
@@ -80,9 +80,7 @@ cat .env  # Should show one of:
 
 ### 2. Environment Variables Not Passing
 
-**Runtime note:** Environment variables passed via `-e` may be lost when using `-i` (interactive/piped stdin).
-
-**Workaround:** The system extracts only authentication variables (`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`) from `.env` and mounts them for sourcing inside the container. Other env vars are not exposed.
+The system extracts only authentication variables (`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`) from `.env` and mounts them for sourcing inside the container. This keeps credentials out of process listings. Other env vars are not exposed.
 
 To verify env vars are reaching the container:
 ```bash
@@ -94,9 +92,8 @@ echo '{}' | docker run -i \
 
 ### 3. Mount Issues
 
-**Container mount notes:**
-- Docker supports both `-v` and `--mount` syntax
-- Use `:ro` suffix for readonly mounts:
+**Docker mount syntax:**
+- `-v` syntax supports `:ro` suffix for readonly:
   ```bash
   # Readonly
   -v /path:/container/path:ro
@@ -326,7 +323,7 @@ echo -e "\n1. Authentication configured?"
 echo -e "\n2. Env file copied for container?"
 [ -f data/env/env ] && echo "OK" || echo "MISSING - will be created on first run"
 
-echo -e "\n3. Container runtime running?"
+echo -e "\n3. Docker daemon running?"
 docker info &>/dev/null && echo "OK" || echo "NOT RUNNING - start Docker Desktop (macOS) or sudo systemctl start docker (Linux)"
 
 echo -e "\n4. Container image exists?"

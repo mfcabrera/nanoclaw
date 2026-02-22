@@ -7,7 +7,6 @@
 </p>
 
 <p align="center">
-  <a href="https://nanoclaw.dev">nanoclaw.dev</a>&nbsp; • &nbsp;
   <a href="README_zh.md">中文</a>&nbsp; • &nbsp;
   <a href="https://discord.gg/VDdww8qS42"><img src="https://img.shields.io/discord/1470188214710046894?label=Discord&logo=discord&v=2" alt="Discord" valign="middle"></a>&nbsp; • &nbsp;
   <a href="repo-tokens"><img src="repo-tokens/badge.svg" alt="34.9k tokens, 17% of context window" valign="middle"></a>
@@ -24,7 +23,7 @@ NanoClaw gives you the same core functionality in a codebase you can understand 
 ## Quick Start
 
 ```bash
-git clone https://github.com/qwibitai/nanoclaw.git
+git clone https://github.com/gavrielc/nanoclaw.git
 cd nanoclaw
 claude
 ```
@@ -35,7 +34,7 @@ Then run `/setup`. Claude Code handles everything: dependencies, authentication,
 
 **Small enough to understand.** One process, a few source files. No microservices, no message queues, no abstraction layers. Have Claude Code walk you through it.
 
-**Secure by isolation.** Agents run in Linux containers (Apple Container on macOS, or Docker). They can only see what's explicitly mounted. Bash access is safe because commands run inside the container, not on your host.
+**Secure by isolation.** Agents run in Docker containers. They can only see what's explicitly mounted. Bash access is safe because commands run inside the container, not on your host.
 
 **Built for one user.** This isn't a framework. It's working software that fits my exact needs. You fork it and have Claude Code make it match your exact needs.
 
@@ -54,7 +53,7 @@ Then run `/setup`. Claude Code handles everything: dependencies, authentication,
 - **Main channel** - Your private channel (self-chat) for admin control; every other group is completely isolated
 - **Scheduled tasks** - Recurring jobs that run Claude and can message you back
 - **Web access** - Search and fetch content
-- **Container isolation** - Agents sandboxed in Apple Container (macOS) or Docker (macOS/Linux)
+- **Container isolation** - Agents sandboxed in Docker containers (macOS/Linux)
 - **Agent Swarms** - Spin up teams of specialized agents that collaborate on complex tasks (first personal AI assistant to support this)
 - **Optional integrations** - Add Gmail (`/add-gmail`) and more via skills
 
@@ -88,6 +87,21 @@ Or run `/customize` for guided changes.
 
 The codebase is small enough that Claude can safely modify it.
 
+## Skills System CLI (Experimental)
+
+The new deterministic skills-system primitives are available as local commands:
+
+```bash
+npm run skills:init -- --core-version 0.5.0 --base-source .
+npm run skills:apply -- --skill whatsapp --version 1.2.0 --files-modified src/server.ts
+npm run skills:update-preview
+npm run skills:update-stage -- --target-core-version 0.6.0 --base-source /path/to/new/core
+npm run skills:update-commit
+# or: npm run skills:update-rollback
+```
+
+These commands operate on `.nanoclaw/state.yaml`, `.nanoclaw/state.next.yaml`, `.nanoclaw/base/`, `.nanoclaw/base.next/`, and `.nanoclaw/backup/`.
+
 ## Contributing
 
 **Don't add features. Add skills.**
@@ -116,7 +130,7 @@ Skills we'd love to see:
 - macOS or Linux
 - Node.js 20+
 - [Claude Code](https://claude.ai/download)
-- [Apple Container](https://github.com/apple/container) (macOS) or [Docker](https://docker.com/products/docker-desktop) (macOS/Linux)
+- [Docker](https://docker.com/products/docker-desktop)
 
 ## Architecture
 
@@ -145,11 +159,11 @@ Because I use WhatsApp. Fork it and run a skill to change it. That's the whole p
 
 **Why Docker?**
 
-Docker provides cross-platform support (macOS and Linux) and a mature ecosystem. On macOS, you can optionally switch to Apple Container via `/convert-to-apple-container` for a lighter-weight native runtime.
+Docker provides cross-platform support (macOS and Linux), a large ecosystem, and mature tooling. Docker Desktop on macOS uses a lightweight Linux VM similar to other container solutions.
 
 **Can I run this on Linux?**
 
-Yes. Docker is the default runtime and works on both macOS and Linux. Just run `/setup`.
+Yes. NanoClaw uses Docker, which works on both macOS and Linux. Just install Docker and run `/setup`.
 
 **Is this secure?**
 
