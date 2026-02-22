@@ -200,6 +200,15 @@ function buildContainerArgs(mounts: VolumeMount[], containerName: string, hasMcp
     args.push('--add-host', 'host.docker.internal:host-gateway');
   }
 
+  // On Linux, match host UID/GID so bind-mounted files are writable.
+  // On macOS Docker Desktop handles this transparently.
+  const hostUid = process.getuid?.();
+  const hostGid = process.getgid?.();
+  if (hostUid != null && hostUid !== 0 && hostUid !== 1000) {
+    args.push('--user', `${hostUid}:${hostGid}`);
+    args.push('-e', 'HOME=/home/node');
+  }
+
   // Docker: -v with :ro suffix for readonly
   for (const mount of mounts) {
     if (mount.readonly) {

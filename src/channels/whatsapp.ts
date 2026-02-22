@@ -159,7 +159,8 @@ export class WhatsAppChannel implements Channel {
         ).toISOString();
 
         // Always notify about chat metadata for group discovery
-        this.opts.onChatMetadata(chatJid, timestamp);
+        const isGroup = chatJid.endsWith('@g.us');
+        this.opts.onChatMetadata(chatJid, timestamp, undefined, 'whatsapp', isGroup);
 
         // Only deliver full message for registered groups
         const groups = this.opts.registeredGroups();
@@ -186,6 +187,9 @@ export class WhatsAppChannel implements Channel {
               content = '[Voice Message - transcription failed]';
             }
           }
+
+          // Skip protocol messages with no text content (encryption keys, read receipts, etc.)
+          if (!content) continue;
 
           const sender = msg.key.participant || msg.key.remoteJid || '';
           const senderName = msg.pushName || sender.split('@')[0];
