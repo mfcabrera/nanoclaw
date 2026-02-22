@@ -1,3 +1,4 @@
+import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
@@ -16,7 +17,6 @@ import {
   writeGroupsSnapshot,
   writeTasksSnapshot,
 } from './container-runner.js';
-import { cleanupOrphans, ensureContainerRuntimeRunning } from './container-runtime.js';
 import {
   getAllChats,
   getAllRegisteredGroups,
@@ -34,9 +34,10 @@ import {
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
 import { startIpcWatcher } from './ipc.js';
-import { findChannel, formatMessages, formatOutbound } from './router.js';
+import { startMcpGateways, stopMcpGateways } from './mcp-gateway.js';
+import { formatMessages, formatOutbound } from './router.js';
 import { startSchedulerLoop } from './task-scheduler.js';
-import { Channel, NewMessage, RegisteredGroup } from './types.js';
+import { NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 
 // Re-export for backwards compatibility during refactor
@@ -49,7 +50,6 @@ let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
 
 let whatsapp: WhatsAppChannel;
-const channels: Channel[] = [];
 const queue = new GroupQueue();
 
 function loadState(): void {
@@ -100,7 +100,7 @@ export function getAvailableGroups(): import('./container-runner.js').AvailableG
   const registeredJids = new Set(Object.keys(registeredGroups));
 
   return chats
-    .filter((c) => c.jid !== '__group_sync__' && c.is_group)
+    .filter((c) => c.jid !== '__group_sync__' && c.jid.endsWith('@g.us'))
     .map((c) => ({
       jid: c.jid,
       name: c.name,
@@ -121,12 +121,6 @@ export function _setRegisteredGroups(groups: Record<string, RegisteredGroup>): v
 async function processGroupMessages(chatJid: string): Promise<boolean> {
   const group = registeredGroups[chatJid];
   if (!group) return true;
-
-  const channel = findChannel(channels, chatJid);
-  if (!channel) {
-    console.log(`Warning: no channel owns JID ${chatJid}, skipping messages`);
-    return true;
-  }
 
   const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
 
@@ -168,7 +162,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }, IDLE_TIMEOUT);
   };
 
-  await channel.setTyping?.(chatJid, true);
+  await whatsapp.setTyping(chatJid, true);
   let hadError = false;
   let outputSentToUser = false;
 
@@ -180,15 +174,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
       logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
       if (text) {
-        await channel.sendMessage(chatJid, text);
+        await whatsapp.sendMessage(chatJid, text);
         outputSentToUser = true;
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)
       resetIdleTimer();
-    }
-
-    if (result.status === 'success') {
-      queue.notifyIdle(chatJid);
     }
 
     if (result.status === 'error') {
@@ -196,7 +186,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }
   });
 
-  await channel.setTyping?.(chatJid, false);
+  await whatsapp.setTyping(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
 
   if (output === 'error' || hadError) {
@@ -331,12 +321,6 @@ async function startMessageLoop(): Promise<void> {
           const group = registeredGroups[chatJid];
           if (!group) continue;
 
-          const channel = findChannel(channels, chatJid);
-          if (!channel) {
-            console.log(`Warning: no channel owns JID ${chatJid}, skipping messages`);
-            continue;
-          }
-
           const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
           const needsTrigger = !isMainGroup && group.requiresTrigger !== false;
 
@@ -370,9 +354,7 @@ async function startMessageLoop(): Promise<void> {
               messagesToSend[messagesToSend.length - 1].timestamp;
             saveState();
             // Show typing indicator while the container processes the piped message
-            channel.setTyping?.(chatJid, true)?.catch((err) =>
-              logger.warn({ chatJid, err }, 'Failed to set typing indicator'),
-            );
+            whatsapp.setTyping(chatJid, true);
           } else {
             // No active container — enqueue for a new one
             queue.enqueueMessageCheck(chatJid);
@@ -404,38 +386,79 @@ function recoverPendingMessages(): void {
   }
 }
 
-function ensureContainerSystemRunning(): void {
-  ensureContainerRuntimeRunning();
-  cleanupOrphans();
+function ensureDockerRunning(): void {
+  try {
+    execSync('docker info', { stdio: 'pipe', timeout: 10000 });
+    logger.debug('Docker daemon is running');
+  } catch {
+    logger.error('Docker daemon is not running');
+    console.error('\n╔════════════════════════════════════════════════════════════════╗');
+    console.error('║  FATAL: Docker is not running                                  ║');
+    console.error('║                                                                ║');
+    console.error('║  Agents cannot run without Docker. To fix:                     ║');
+    console.error('║  macOS: Start Docker Desktop                                   ║');
+    console.error('║  Linux: sudo systemctl start docker                            ║');
+    console.error('║                                                                ║');
+    console.error('║  Install from: https://docker.com/products/docker-desktop      ║');
+    console.error('╚════════════════════════════════════════════════════════════════╝\n');
+    throw new Error('Docker is required but not running');
+  }
+
+  // Kill and clean up orphaned NanoClaw containers from previous runs
+  try {
+    const output = execSync('docker ps --format json --filter name=nanoclaw-', {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      encoding: 'utf-8',
+    });
+    const orphans: string[] = [];
+    for (const line of output.trim().split('\n')) {
+      if (!line) continue;
+      try {
+        const container = JSON.parse(line);
+        if (container.Names && container.Names.startsWith('nanoclaw-')) {
+          orphans.push(container.Names);
+        }
+      } catch { /* skip unparseable lines */ }
+    }
+    for (const name of orphans) {
+      try {
+        execSync(`docker stop ${name}`, { stdio: 'pipe' });
+      } catch { /* already stopped */ }
+    }
+    if (orphans.length > 0) {
+      logger.info({ count: orphans.length, names: orphans }, 'Stopped orphaned containers');
+    }
+  } catch (err) {
+    logger.warn({ err }, 'Failed to clean up orphaned containers');
+  }
 }
 
 async function main(): Promise<void> {
-  ensureContainerSystemRunning();
+  ensureDockerRunning();
   initDatabase();
   logger.info('Database initialized');
   loadState();
+  await startMcpGateways();
 
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
+    await stopMcpGateways();
     await queue.shutdown(10000);
-    for (const ch of channels) await ch.disconnect();
+    await whatsapp.disconnect();
     process.exit(0);
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));
 
-  // Channel callbacks (shared by all channels)
-  const channelOpts = {
-    onMessage: (_chatJid: string, msg: NewMessage) => storeMessage(msg),
-    onChatMetadata: (chatJid: string, timestamp: string, name?: string, channel?: string, isGroup?: boolean) =>
-      storeChatMetadata(chatJid, timestamp, name, channel, isGroup),
+  // Create WhatsApp channel
+  whatsapp = new WhatsAppChannel({
+    onMessage: (chatJid, msg) => storeMessage(msg),
+    onChatMetadata: (chatJid, timestamp) => storeChatMetadata(chatJid, timestamp),
     registeredGroups: () => registeredGroups,
-  };
+  });
 
-  // Create and connect channels
-  whatsapp = new WhatsAppChannel(channelOpts);
-  channels.push(whatsapp);
+  // Connect — resolves when first connected
   await whatsapp.connect();
 
   // Start subsystems (independently of connection handler)
@@ -445,33 +468,21 @@ async function main(): Promise<void> {
     queue,
     onProcess: (groupJid, proc, containerName, groupFolder) => queue.registerProcess(groupJid, proc, containerName, groupFolder),
     sendMessage: async (jid, rawText) => {
-      const channel = findChannel(channels, jid);
-      if (!channel) {
-        console.log(`Warning: no channel owns JID ${jid}, cannot send message`);
-        return;
-      }
       const text = formatOutbound(rawText);
-      if (text) await channel.sendMessage(jid, text);
+      if (text) await whatsapp.sendMessage(jid, text);
     },
   });
   startIpcWatcher({
-    sendMessage: (jid, text) => {
-      const channel = findChannel(channels, jid);
-      if (!channel) throw new Error(`No channel for JID: ${jid}`);
-      return channel.sendMessage(jid, text);
-    },
+    sendMessage: (jid, text) => whatsapp.sendMessage(jid, text),
     registeredGroups: () => registeredGroups,
     registerGroup,
-    syncGroupMetadata: (force) => whatsapp?.syncGroupMetadata(force) ?? Promise.resolve(),
+    syncGroupMetadata: (force) => whatsapp.syncGroupMetadata(force),
     getAvailableGroups,
     writeGroupsSnapshot: (gf, im, ag, rj) => writeGroupsSnapshot(gf, im, ag, rj),
   });
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
-  startMessageLoop().catch((err) => {
-    logger.fatal({ err }, 'Message loop crashed unexpectedly');
-    process.exit(1);
-  });
+  startMessageLoop();
 }
 
 // Guard: only run when executed directly, not when imported by tests

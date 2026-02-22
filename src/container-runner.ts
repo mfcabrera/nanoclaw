@@ -1,6 +1,6 @@
 /**
  * Container Runner for NanoClaw
- * Spawns agent execution in containers and handles IPC
+ * Spawns agent execution in Docker container and handles IPC
  */
 import { ChildProcess, exec, spawn } from 'child_process';
 import fs from 'fs';
@@ -17,7 +17,7 @@ import {
 } from './config.js';
 import { readEnvFile } from './env.js';
 import { logger } from './logger.js';
-import { CONTAINER_RUNTIME_BIN, readonlyMountArgs, stopContainer } from './container-runtime.js';
+import { getAvailableGateways } from './mcp-gateway.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
 
@@ -43,6 +43,7 @@ export interface ContainerInput {
   isMain: boolean;
   isScheduledTask?: boolean;
   secrets?: Record<string, string>;
+  mcpGateways?: Array<{ name: string; url: string }>;
 }
 
 export interface ContainerOutput {
@@ -89,7 +90,7 @@ function buildVolumeMounts(
     });
 
     // Global memory directory (read-only for non-main)
-    // Only directory mounts are supported, not file mounts
+    // Docker bind mounts work with both files and directories
     const globalDir = path.join(GROUPS_DIR, 'global');
     if (fs.existsSync(globalDir)) {
       mounts.push({
@@ -134,7 +135,12 @@ function buildVolumeMounts(
       const srcDir = path.join(skillsSrc, skillDir);
       if (!fs.statSync(srcDir).isDirectory()) continue;
       const dstDir = path.join(skillsDst, skillDir);
-      fs.cpSync(srcDir, dstDir, { recursive: true });
+      fs.mkdirSync(dstDir, { recursive: true });
+      for (const file of fs.readdirSync(srcDir)) {
+        const srcFile = path.join(srcDir, file);
+        const dstFile = path.join(dstDir, file);
+        fs.copyFileSync(srcFile, dstFile);
+      }
     }
   }
   mounts.push({
@@ -156,7 +162,7 @@ function buildVolumeMounts(
   });
 
   // Mount agent-runner source from host — recompiled on container startup.
-  // Bypasses sticky build cache for code changes.
+  // Bypasses Docker's build cache for code changes.
   const agentRunnerSrc = path.join(projectRoot, 'container', 'agent-runner', 'src');
   mounts.push({
     hostPath: agentRunnerSrc,
@@ -185,22 +191,19 @@ function readSecrets(): Record<string, string> {
   return readEnvFile(['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY']);
 }
 
-function buildContainerArgs(mounts: VolumeMount[], containerName: string): string[] {
+function buildContainerArgs(mounts: VolumeMount[], containerName: string, hasMcpGateways: boolean): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
-  // Run as host user so bind-mounted files are accessible.
-  // Skip when running as root (uid 0), as the container's node user (uid 1000),
-  // or when getuid is unavailable (native Windows without WSL).
-  const hostUid = process.getuid?.();
-  const hostGid = process.getgid?.();
-  if (hostUid != null && hostUid !== 0 && hostUid !== 1000) {
-    args.push('--user', `${hostUid}:${hostGid}`);
-    args.push('-e', 'HOME=/home/node');
+  // Allow container to reach host services (MCP gateways, etc.)
+  // Harmless on macOS (already available), required on Linux.
+  if (hasMcpGateways) {
+    args.push('--add-host', 'host.docker.internal:host-gateway');
   }
 
+  // Docker: -v with :ro suffix for readonly
   for (const mount of mounts) {
     if (mount.readonly) {
-      args.push(...readonlyMountArgs(mount.hostPath, mount.containerPath));
+      args.push('-v', `${mount.hostPath}:${mount.containerPath}:ro`);
     } else {
       args.push('-v', `${mount.hostPath}:${mount.containerPath}`);
     }
@@ -223,9 +226,25 @@ export async function runContainerAgent(
   fs.mkdirSync(groupDir, { recursive: true });
 
   const mounts = buildVolumeMounts(group, input.isMain);
+
+  // Filter available MCP gateways by group's mcpServers allowlist
+  const allGateways = getAvailableGateways();
+  const allowedServers = group.containerConfig?.mcpServers;
+  if (allowedServers && allowedServers.length > 0) {
+    const filtered = allGateways.filter((gw) => allowedServers.includes(gw.name));
+    if (filtered.length > 0) {
+      input.mcpGateways = filtered;
+      logger.info(
+        { group: group.name, gateways: filtered.map((g) => g.name) },
+        'Passing MCP gateways to container',
+      );
+    }
+  }
+
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
-  const containerArgs = buildContainerArgs(mounts, containerName);
+  const hasMcpGateways = (input.mcpGateways?.length ?? 0) > 0;
+  const containerArgs = buildContainerArgs(mounts, containerName, hasMcpGateways);
 
   logger.debug(
     {
@@ -254,7 +273,7 @@ export async function runContainerAgent(
   fs.mkdirSync(logsDir, { recursive: true });
 
   return new Promise((resolve) => {
-    const container = spawn(CONTAINER_RUNTIME_BIN, containerArgs, {
+    const container = spawn('docker', containerArgs, {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
@@ -361,7 +380,7 @@ export async function runContainerAgent(
     const killOnTimeout = () => {
       timedOut = true;
       logger.error({ group: group.name, containerName }, 'Container timeout, stopping gracefully');
-      exec(stopContainer(containerName), { timeout: 15000 }, (err) => {
+      exec(`docker stop ${containerName}`, { timeout: 15000 }, (err) => {
         if (err) {
           logger.warn({ group: group.name, containerName, err }, 'Graceful stop failed, force killing');
           container.kill('SIGKILL');
