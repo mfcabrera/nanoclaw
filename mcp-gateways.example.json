@@ -1,0 +1,16 @@
+{
+  "gateways": [
+    {
+      "name": "google-calendar",
+      "type": "stdio",
+      "command": "npx",
+      "args": ["@cocal/google-calendar-mcp"],
+      "env": {
+        "GOOGLE_OAUTH_CREDENTIALS": "/Users/mfcabrera/PersonalDrive/secrets.json"
+      },
+      "port": 3100,
+      "description": "Google Calendar MCP (personal + work accounts)",
+      "optional": true
+    }
+  ]
+}

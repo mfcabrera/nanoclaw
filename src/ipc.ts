@@ -357,12 +357,18 @@ export async function processTaskIpc(
         break;
       }
       if (data.jid && data.name && data.folder && data.trigger) {
+        // Preserve existing containerConfig when not explicitly provided,
+        // so re-registration doesn't accidentally wipe mounts/mcpServers.
+        const existing = deps.registeredGroups()[data.jid];
+        const mergedContainerConfig = data.containerConfig
+          ?? existing?.containerConfig;
+
         deps.registerGroup(data.jid, {
           name: data.name,
           folder: data.folder,
           trigger: data.trigger,
           added_at: new Date().toISOString(),
-          containerConfig: data.containerConfig,
+          containerConfig: mergedContainerConfig,
           requiresTrigger: data.requiresTrigger,
         });
       } else {

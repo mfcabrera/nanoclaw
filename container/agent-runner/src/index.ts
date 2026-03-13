@@ -188,7 +188,70 @@ function createPreCompactHook(): HookCallback {
 // Secrets to strip from Bash tool subprocess environments.
 // These are needed by claude-code for API auth but should never
 // be visible to commands Kit runs.
+// Note: DATABRICKS_* vars are intentionally NOT listed here —
+// they must be available to Bash for CLI and Python SDK usage.
 const SECRET_ENV_VARS = ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN'];
+
+/**
+ * Set up Databricks auth from secrets.
+ *
+ * Supports two environments (development + production) with separate tokens.
+ * Env vars in .env:
+ *   DATABRICKS_DEV_HOST, DATABRICKS_DEV_TOKEN, DATABRICKS_DEV_HTTP_PATH
+ *   DATABRICKS_PROD_HOST, DATABRICKS_PROD_TOKEN, DATABRICKS_PROD_HTTP_PATH
+ *
+ * Writes ~/.databrickscfg with profiles: [DEFAULT] (=dev), [development], [production]
+ * Sets standard env vars (DATABRICKS_HOST, DATABRICKS_TOKEN, etc.) to dev for safety.
+ */
+function setupDatabricksAuth(secrets: Record<string, string>): void {
+  const devHost = secrets['DATABRICKS_DEV_HOST'];
+  const devToken = secrets['DATABRICKS_DEV_TOKEN'];
+  const devHttpPath = secrets['DATABRICKS_DEV_HTTP_PATH'];
+  const prodHost = secrets['DATABRICKS_PROD_HOST'];
+  const prodToken = secrets['DATABRICKS_PROD_TOKEN'];
+  const prodHttpPath = secrets['DATABRICKS_PROD_HTTP_PATH'];
+
+  if (!devHost && !prodHost) return;
+
+  // Set standard env vars to dev by default (safer for ad-hoc scripts)
+  if (devHost) process.env['DATABRICKS_HOST'] = devHost;
+  if (devToken) process.env['DATABRICKS_TOKEN'] = devToken;
+  if (devHost) process.env['DATABRICKS_SERVER_HOSTNAME'] = devHost.replace(/^https?:\/\//, '');
+  if (devHttpPath) process.env['DATABRICKS_HTTP_PATH'] = devHttpPath;
+
+  // Also expose per-environment vars so scripts can target a specific env
+  if (devHost) process.env['DATABRICKS_DEV_HOST'] = devHost;
+  if (devToken) process.env['DATABRICKS_DEV_TOKEN'] = devToken;
+  if (devHttpPath) process.env['DATABRICKS_DEV_HTTP_PATH'] = devHttpPath;
+  if (prodHost) process.env['DATABRICKS_PROD_HOST'] = prodHost;
+  if (prodToken) process.env['DATABRICKS_PROD_TOKEN'] = prodToken;
+  if (prodHttpPath) process.env['DATABRICKS_PROD_HTTP_PATH'] = prodHttpPath;
+
+  // Build ~/.databrickscfg with named profiles
+  const lines: string[] = [];
+
+  if (devHost && devToken) {
+    // DEFAULT profile points to dev (safe default)
+    lines.push('[DEFAULT]', `host = ${devHost}`, `token = ${devToken}`, '');
+    lines.push('[development]', `host = ${devHost}`, `token = ${devToken}`, '');
+  }
+
+  if (prodHost && prodToken) {
+    lines.push('[production]', `host = ${prodHost}`, `token = ${prodToken}`, '');
+  }
+
+  if (lines.length === 0) return;
+
+  const home = process.env.HOME || '/home/node';
+  const cfgPath = `${home}/.databrickscfg`;
+  try {
+    fs.writeFileSync(cfgPath, lines.join('\n') + '\n', { mode: 0o600 });
+    const profiles = [devToken ? 'DEFAULT, development' : '', prodToken ? 'production' : ''].filter(Boolean).join(', ');
+    log(`Wrote Databricks config to ${cfgPath} (profiles: ${profiles})`);
+  } catch (err) {
+    log(`Failed to write ${cfgPath}: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
 
 function createSanitizeBashHook(): HookCallback {
   return async (input, _toolUseId, _context) => {
@@ -437,6 +500,42 @@ async function runQuery(
     log(`Adding MCP gateway: ${gw.name} -> ${gw.url}`);
   }
 
+  // Linear: use API key-based MCP server instead of mcp-remote (which needs OAuth browser flow)
+  if (process.env['LINEAR_API_KEY'] && mcpServersConfig['linear']) {
+    mcpServersConfig['linear'] = {
+      command: 'npx',
+      args: ['-y', 'linear-mcp-server'],
+      env: { LINEAR_API_KEY: process.env['LINEAR_API_KEY'] },
+    };
+    log('Overriding linear gateway with API key-based MCP server');
+  }
+
+  // Google Calendar MCP — direct stdio (no proxy needed)
+  // Tokens are mounted at /workspace/extra/google-calendar-mcp/ but the MCP
+  // server reads from ~/.config/google-calendar-mcp/ by default.
+  // Symlink them into place if present.
+  const gcalMountDir = '/workspace/extra/google-calendar-mcp';
+  const gcalExpectedDir = path.join(process.env.HOME || '/home/node', '.config', 'google-calendar-mcp');
+  const gcalCreds = '/workspace/extra/google-oauth-credentials.json';
+  if (fs.existsSync(path.join(gcalMountDir, 'tokens.json')) && fs.existsSync(gcalCreds)) {
+    try {
+      fs.mkdirSync(path.dirname(gcalExpectedDir), { recursive: true });
+      if (!fs.existsSync(gcalExpectedDir)) {
+        fs.symlinkSync(gcalMountDir, gcalExpectedDir);
+      }
+    } catch (e) {
+      log(`Warning: could not symlink google-calendar-mcp config: ${e}`);
+    }
+    mcpServersConfig['google-calendar'] = {
+      command: 'npx',
+      args: ['-y', '@cocal/google-calendar-mcp'],
+      env: {
+        GOOGLE_OAUTH_CREDENTIALS: gcalCreds,
+      },
+    };
+    log('Adding direct MCP server: google-calendar');
+  }
+
   // Build allowed tools list
   const allowedTools = [
     'Bash',
@@ -448,6 +547,8 @@ async function runQuery(
     'NotebookEdit',
     'mcp__nanoclaw__*',
     ...mcpGateways.map(gw => `mcp__${gw.name}__*`),
+    // Direct MCP servers (not proxied)
+    ...(mcpServersConfig['google-calendar'] ? ['mcp__google-calendar__*'] : []),
   ];
 
   for await (const message of query({
@@ -475,6 +576,19 @@ async function runQuery(
     messageCount++;
     const msgType = message.type === 'system' ? `system/${(message as { subtype?: string }).subtype}` : message.type;
     log(`[msg #${messageCount}] type=${msgType}`);
+
+    // Verbose: log assistant text and tool usage for real-time observability
+    if (message.type === 'assistant') {
+      const msg = message as { content?: Array<{ type: string; text?: string; name?: string; input?: unknown }> };
+      for (const block of msg.content || []) {
+        if (block.type === 'text' && block.text) {
+          log(`[assistant] ${block.text.slice(0, 500)}`);
+        } else if (block.type === 'tool_use' && block.name) {
+          const inputStr = block.input ? JSON.stringify(block.input).slice(0, 200) : '';
+          log(`[tool_use] ${block.name}${inputStr ? ': ' + inputStr : ''}`);
+        }
+      }
+    }
 
     if (message.type === 'assistant' && 'uuid' in message) {
       lastAssistantUuid = (message as { uuid: string }).uuid;
@@ -525,8 +639,30 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  // Set up Databricks auth before building SDK env
+  // (writes ~/.databrickscfg and sets DATABRICKS_* in process.env for Bash access)
+  if (containerInput.secrets) {
+    setupDatabricksAuth(containerInput.secrets);
+
+    // GitHub CLI: set GH_TOKEN in process.env so gh and git commands work from Bash
+    if (containerInput.secrets['GH_TOKEN']) {
+      process.env['GH_TOKEN'] = containerInput.secrets['GH_TOKEN'];
+    }
+
+    // YNAB API: set token in process.env so curl/scripts can access it from Bash
+    if (containerInput.secrets['YNAB_API_TOKEN']) {
+      process.env['YNAB_API_TOKEN'] = containerInput.secrets['YNAB_API_TOKEN'];
+    }
+
+    // Linear API: set key in process.env for the Linear MCP server
+    if (containerInput.secrets['LINEAR_API_KEY']) {
+      process.env['LINEAR_API_KEY'] = containerInput.secrets['LINEAR_API_KEY'];
+    }
+  }
+
   // Build SDK env: merge secrets into process.env for the SDK only.
   // Secrets never touch process.env itself, so Bash subprocesses can't see them.
+  // (Databricks vars are the exception — they were set in process.env above)
   const sdkEnv: Record<string, string | undefined> = { ...process.env };
   for (const [key, value] of Object.entries(containerInput.secrets || {})) {
     sdkEnv[key] = value;

@@ -15,6 +15,7 @@ import readline from 'readline';
 import makeWASocket, {
   Browsers,
   DisconnectReason,
+  fetchLatestBaileysVersion,
   makeCacheableSignalKeyStore,
   useMultiFileAuthState,
 } from '@whiskeysockets/baileys';
@@ -53,7 +54,10 @@ async function connectSocket(phoneNumber?: string, isReconnect = false): Promise
     process.exit(0);
   }
 
+  const { version } = await fetchLatestBaileysVersion();
+
   const sock = makeWASocket({
+    version,
     auth: {
       creds: state.creds,
       keys: makeCacheableSignalKeyStore(state.keys, logger),

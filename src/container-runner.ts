@@ -188,10 +188,28 @@ function buildVolumeMounts(
  * Secrets are never written to disk or mounted as files.
  */
 function readSecrets(): Record<string, string> {
-  return readEnvFile(['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY']);
+  return readEnvFile([
+    'CLAUDE_CODE_OAUTH_TOKEN',
+    'ANTHROPIC_API_KEY',
+    // Databricks auth — per-environment credentials
+    // Development workspace
+    'DATABRICKS_DEV_HOST',
+    'DATABRICKS_DEV_TOKEN',
+    'DATABRICKS_DEV_HTTP_PATH',
+    // Production workspace
+    'DATABRICKS_PROD_HOST',
+    'DATABRICKS_PROD_TOKEN',
+    'DATABRICKS_PROD_HTTP_PATH',
+    // GitHub CLI token
+    'GH_TOKEN',
+    // YNAB Personal Access Token
+    'YNAB_API_TOKEN',
+    // Linear API key
+    'LINEAR_API_KEY',
+  ]);
 }
 
-function buildContainerArgs(mounts: VolumeMount[], containerName: string, hasMcpGateways: boolean): string[] {
+function buildContainerArgs(mounts: VolumeMount[], containerName: string, hasMcpGateways: boolean, image?: string): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
   // Allow container to reach host services (MCP gateways, etc.)
@@ -218,7 +236,7 @@ function buildContainerArgs(mounts: VolumeMount[], containerName: string, hasMcp
     }
   }
 
-  args.push(CONTAINER_IMAGE);
+  args.push(image || CONTAINER_IMAGE);
 
   return args;
 }
@@ -250,10 +268,30 @@ export async function runContainerAgent(
     }
   }
 
+  // Direct MCP servers: containers connect to these URLs directly via mcp-remote,
+  // bypassing the gateway proxy. More reliable for SSE-based servers that drop
+  // idle connections (which kills supergateway).
+  const DIRECT_MCP_SERVERS: Record<string, string> = {
+    'linear': 'https://mcp.linear.app/sse',
+  };
+
+  if (allowedServers) {
+    for (const [name, url] of Object.entries(DIRECT_MCP_SERVERS)) {
+      if (allowedServers.includes(name)) {
+        // Only add if not already provided by a healthy gateway
+        const alreadyProvided = input.mcpGateways?.some(g => g.name === name);
+        if (!alreadyProvided) {
+          input.mcpGateways = input.mcpGateways || [];
+          input.mcpGateways.push({ name, url });
+        }
+      }
+    }
+  }
+
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
   const hasMcpGateways = (input.mcpGateways?.length ?? 0) > 0;
-  const containerArgs = buildContainerArgs(mounts, containerName, hasMcpGateways);
+  const containerArgs = buildContainerArgs(mounts, containerName, hasMcpGateways, group.containerConfig?.containerImage);
 
   logger.debug(
     {

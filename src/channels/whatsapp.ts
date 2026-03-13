@@ -5,6 +5,7 @@ import path from 'path';
 import makeWASocket, {
   Browsers,
   DisconnectReason,
+  fetchLatestBaileysVersion,
   WASocket,
   makeCacheableSignalKeyStore,
   useMultiFileAuthState,
@@ -56,12 +57,15 @@ export class WhatsAppChannel implements Channel {
 
     const { state, saveCreds } = await useMultiFileAuthState(authDir);
 
+    const { version } = await fetchLatestBaileysVersion();
+
     this.sock = makeWASocket({
+      version,
       auth: {
         creds: state.creds,
         keys: makeCacheableSignalKeyStore(state.keys, logger),
       },
-      printQRInTerminal: false,
+      printQRInTerminal: true,
       logger,
       browser: Browsers.macOS('Chrome'),
     });
@@ -70,13 +74,13 @@ export class WhatsAppChannel implements Channel {
       const { connection, lastDisconnect, qr } = update;
 
       if (qr) {
-        const msg =
-          'WhatsApp authentication required. Run /setup in Claude Code.';
-        logger.error(msg);
-        exec(
-          `osascript -e 'display notification "${msg}" with title "NanoClaw" sound name "Basso"'`,
-        );
-        setTimeout(() => process.exit(1), 1000);
+        // Show QR code in terminal for manual linking
+        import('qrcode-terminal').then((qrt) => {
+          qrt.default.generate(qr, { small: true });
+          console.error('\nScan the QR code above with WhatsApp → Linked Devices → Link a Device\n');
+        }).catch(() => {
+          logger.error(`QR code (paste into QR renderer): ${qr}`);
+        });
       }
 
       if (connection === 'close') {

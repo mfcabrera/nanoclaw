@@ -31,6 +31,7 @@ export interface ContainerConfig {
   additionalMounts?: AdditionalMount[];
   timeout?: number; // Default: 300000 (5 minutes)
   mcpServers?: string[]; // Gateway names this group can access
+  containerImage?: string; // Override default image (e.g., 'nanoclaw-agent-platoml:latest')
 }
 
 export interface RegisteredGroup {
