@@ -61,11 +61,11 @@ This is the **main channel**, which has elevated privileges.
 
 ## Container Mounts
 
-Main has access to the entire project:
+Main has read-only access to the project and read-write access to its group folder:
 
 | Container Path | Host Path | Access |
 |----------------|-----------|--------|
-| `/workspace/project` | Project root | read-write |
+| `/workspace/project` | Project root | read-only |
 | `/workspace/group` | `groups/main/` | read-write |
 
 Key paths inside the container:
@@ -123,15 +123,16 @@ Groups are stored in SQLite at `/workspace/project/store/messages.db` in the `re
 
 ```bash
 # List all registered groups
-sqlite3 /workspace/project/store/messages.db "SELECT jid, name, folder, trigger_pattern, container_config FROM registered_groups;"
+sqlite3 /workspace/project/store/messages.db "SELECT jid, name, folder, trigger_pattern, requires_trigger, is_main, container_config FROM registered_groups;"
 ```
 
 Columns:
-- **jid**: The WhatsApp JID (unique identifier for the chat)
+- **jid**: The chat JID (unique identifier — WhatsApp, Telegram, Slack, Discord, etc.)
 - **name**: Display name for the group
-- **folder**: Folder name under `groups/` for this group's files and memory
+- **folder**: Channel-prefixed folder name under `groups/` for this group's files and memory
 - **trigger_pattern**: The trigger word (usually same as global, but could differ)
 - **requires_trigger**: 1 (default) or 0. Set to 0 for solo/personal chats where all messages should be processed
+- **is_main**: Whether this is the main control group (elevated privileges, no trigger required)
 - **added_at**: ISO timestamp when registered
 - **container_config**: JSON with `additionalMounts`, `mcpServers`, `timeout`, `containerImage`
 
@@ -139,8 +140,8 @@ Columns:
 
 ### Trigger Behavior
 
-- **Main group**: No trigger needed — all messages are processed automatically
-- **Groups with `requiresTrigger: false`**: No trigger needed — all messages processed (use for 1-on-1 or solo chats)
+- **Main group** (`is_main: 1`): No trigger needed — all messages are processed automatically
+- **Groups with `requires_trigger: 0`**: No trigger needed — all messages processed (use for 1-on-1 or solo chats)
 - **Other groups** (default): Messages must start with `@AssistantName` to be processed
 
 ### Adding a Group
@@ -154,7 +155,7 @@ cat > /workspace/ipc/tasks/register_$(date +%s).json <<'EOF'
   "type": "register_group",
   "jid": "1234567890@g.us",
   "name": "Family Chat",
-  "folder": "family-chat",
+  "folder": "whatsapp_family-chat",
   "trigger": "@Nelson",
   "requiresTrigger": true,
   "containerConfig": {
@@ -164,13 +165,15 @@ cat > /workspace/ipc/tasks/register_$(date +%s).json <<'EOF'
 EOF
 ```
 
-3. Create the group folder: `/workspace/project/groups/{folder-name}/`
+3. The group folder is created automatically: `/workspace/project/groups/{folder-name}/`
 4. Optionally create an initial `CLAUDE.md` for the group
 
-Example folder name conventions:
-- "Family Chat" → `family-chat`
-- "Work Team" → `work-team`
-- Use lowercase, hyphens instead of spaces
+Folder naming convention — channel prefix with underscore separator:
+- WhatsApp "Family Chat" → `whatsapp_family-chat`
+- Telegram "Dev Team" → `telegram_dev-team`
+- Discord "General" → `discord_general`
+- Slack "Engineering" → `slack_engineering`
+- Use lowercase, hyphens for the group name part
 
 #### Adding Additional Directories for a Group
 
@@ -193,6 +196,37 @@ The directory will appear at `/workspace/extra/webapp` in that group's container
 
 Host paths must be in the mount allowlist at `~/.config/nanoclaw/mount-allowlist.json` (managed by the host, not the container).
 
+#### Sender Allowlist
+
+After registering a group, explain the sender allowlist feature to the user:
+
+> This group can be configured with a sender allowlist to control who can interact with me. There are two modes:
+>
+> - **Trigger mode** (default): Everyone's messages are stored for context, but only allowed senders can trigger me with @{AssistantName}.
+> - **Drop mode**: Messages from non-allowed senders are not stored at all.
+>
+> For closed groups with trusted members, I recommend setting up an allow-only list so only specific people can trigger me. Want me to configure that?
+
+If the user wants to set up an allowlist, edit `~/.config/nanoclaw/sender-allowlist.json` on the host:
+
+```json
+{
+  "default": { "allow": "*", "mode": "trigger" },
+  "chats": {
+    "<chat-jid>": {
+      "allow": ["sender-id-1", "sender-id-2"],
+      "mode": "trigger"
+    }
+  },
+  "logDenied": true
+}
+```
+
+Notes:
+- Your own messages (`is_from_me`) explicitly bypass the allowlist in trigger checks. Bot messages are filtered out by the database query before trigger evaluation, so they never reach the allowlist.
+- If the config file doesn't exist or is invalid, all senders are allowed (fail-open)
+- The config file is on the host at `~/.config/nanoclaw/sender-allowlist.json`, not inside the container
+
 ### Removing a Group
 
 ```bash
@@ -204,7 +238,7 @@ The group folder and its files remain (don't delete them).
 ### Listing Groups
 
 ```bash
-sqlite3 /workspace/project/store/messages.db "SELECT jid, name, folder, trigger_pattern, container_config FROM registered_groups;"
+sqlite3 /workspace/project/store/messages.db "SELECT jid, name, folder, trigger_pattern, requires_trigger, is_main, container_config FROM registered_groups;"
 ```
 
 ---
