@@ -83,6 +83,13 @@ function readSecrets(): Record<string, string> {
     'YNAB_API_TOKEN',
     // Linear API key
     'LINEAR_API_KEY',
+    // Seedbox (RapidSeedbox) password
+    'SEEDBOX_PASSWORD',
+    // NAS (Synology) password
+    'NAS_PASSWORD',
+    // Kleinanzeigen.de login
+    'KLEINANZEIGEN_EMAIL',
+    'KLEINANZEIGEN_PASSWORD',
   ]);
 }
 
@@ -311,6 +318,18 @@ export async function runContainerAgent(
 ): Promise<ContainerOutput> {
   const startTime = Date.now();
 
+  // Inject non-Anthropic secrets (YNAB, GH, Linear, etc.) into the container input.
+  // Anthropic credentials are handled by the credential proxy and never sent via stdin.
+  if (!input.secrets) {
+    const secrets = readSecrets();
+    // Remove Anthropic credentials — those go through the credential proxy
+    delete secrets['ANTHROPIC_API_KEY'];
+    delete secrets['CLAUDE_CODE_OAUTH_TOKEN'];
+    if (Object.keys(secrets).length > 0) {
+      input.secrets = secrets;
+    }
+  }
+
   const groupDir = resolveGroupFolderPath(group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
 
@@ -320,7 +339,9 @@ export async function runContainerAgent(
   const allGateways = getAvailableGateways();
   const allowedServers = group.containerConfig?.mcpServers;
   if (allowedServers && allowedServers.length > 0) {
-    const filtered = allGateways.filter((gw) => allowedServers.includes(gw.name));
+    const filtered = allGateways.filter((gw) =>
+      allowedServers.includes(gw.name),
+    );
     if (filtered.length > 0) {
       input.mcpGateways = filtered;
       logger.info(
@@ -334,14 +355,14 @@ export async function runContainerAgent(
   // bypassing the gateway proxy. More reliable for SSE-based servers that drop
   // idle connections (which kills supergateway).
   const DIRECT_MCP_SERVERS: Record<string, string> = {
-    'linear': 'https://mcp.linear.app/sse',
+    linear: 'https://mcp.linear.app/sse',
   };
 
   if (allowedServers) {
     for (const [name, url] of Object.entries(DIRECT_MCP_SERVERS)) {
       if (allowedServers.includes(name)) {
         // Only add if not already provided by a healthy gateway
-        const alreadyProvided = input.mcpGateways?.some(g => g.name === name);
+        const alreadyProvided = input.mcpGateways?.some((g) => g.name === name);
         if (!alreadyProvided) {
           input.mcpGateways = input.mcpGateways || [];
           input.mcpGateways.push({ name, url });
@@ -353,7 +374,12 @@ export async function runContainerAgent(
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
   const hasMcpGateways = (input.mcpGateways?.length ?? 0) > 0;
-  const containerArgs = buildContainerArgs(mounts, containerName, hasMcpGateways, group.containerConfig?.containerImage);
+  const containerArgs = buildContainerArgs(
+    mounts,
+    containerName,
+    hasMcpGateways,
+    group.containerConfig?.containerImage,
+  );
 
   logger.debug(
     {

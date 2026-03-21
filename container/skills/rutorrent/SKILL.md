@@ -12,13 +12,13 @@ Adds magnet links or .torrent file URLs to Mikkel's ruTorrent seedbox via the rT
 
 - **URL**: https://rapidseedbox53414-rt.swift-013.seedbox.vip/
 - **Username**: rapidseedbox53414
-- **Password**: f24f6e171427
+- **Password**: (from env var `SEEDBOX_PASSWORD`)
 - **API Endpoint**: https://rapidseedbox53414-rt.swift-013.seedbox.vip/plugins/httprpc/action.php
 
 ## Adding a Magnet Link
 
 ```bash
-curl -s -u "rapidseedbox53414:f24f6e171427" \
+curl -s -u "rapidseedbox53414:$SEEDBOX_PASSWORD" \
   "https://rapidseedbox53414-rt.swift-013.seedbox.vip/plugins/httprpc/action.php" \
   --data '<?xml version="1.0"?><methodCall><methodName>load.start</methodName><params><param><value><string></string></value></param><param><value><string>MAGNET_LINK_HERE</string></value></param></params></methodCall>' \
   -H "Content-Type: text/xml"
@@ -27,7 +27,7 @@ curl -s -u "rapidseedbox53414:f24f6e171427" \
 ## Adding a .torrent File URL
 
 ```bash
-curl -s -u "rapidseedbox53414:f24f6e171427" \
+curl -s -u "rapidseedbox53414:$SEEDBOX_PASSWORD" \
   "https://rapidseedbox53414-rt.swift-013.seedbox.vip/plugins/httprpc/action.php" \
   --data '<?xml version="1.0"?><methodCall><methodName>load.start</methodName><params><param><value><string></string></value></param><param><value><string>TORRENT_URL_HERE</string></value></param></params></methodCall>' \
   -H "Content-Type: text/xml"
@@ -36,7 +36,7 @@ curl -s -u "rapidseedbox53414:f24f6e171427" \
 ## Listing Current Torrents
 
 ```bash
-curl -s -u "rapidseedbox53414:f24f6e171427" \
+curl -s -u "rapidseedbox53414:$SEEDBOX_PASSWORD" \
   "https://rapidseedbox53414-rt.swift-013.seedbox.vip/plugins/httprpc/action.php" \
   --data '<?xml version="1.0"?><methodCall><methodName>download_list</methodName><params></params></methodCall>' \
   -H "Content-Type: text/xml"

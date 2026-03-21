@@ -569,7 +569,7 @@ async function runQuery(
       settingSources: ['project', 'user'],
       mcpServers: mcpServersConfig,
       hooks: {
-        PreToolUse: [{ toolName: 'Bash', hooks: [createSanitizeBashHook()] }],
+        PreToolUse: [{ matcher: 'Bash', hooks: [createSanitizeBashHook()] }],
         PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName)] }],
       },
     }
@@ -657,6 +657,24 @@ async function main(): Promise<void> {
     // Linear API: set key in process.env for the Linear MCP server
     if (containerInput.secrets['LINEAR_API_KEY']) {
       process.env['LINEAR_API_KEY'] = containerInput.secrets['LINEAR_API_KEY'];
+    }
+
+    // Seedbox: password for ruTorrent/SFTP access
+    if (containerInput.secrets['SEEDBOX_PASSWORD']) {
+      process.env['SEEDBOX_PASSWORD'] = containerInput.secrets['SEEDBOX_PASSWORD'];
+    }
+
+    // NAS: Synology SMB/rclone password
+    if (containerInput.secrets['NAS_PASSWORD']) {
+      process.env['NAS_PASSWORD'] = containerInput.secrets['NAS_PASSWORD'];
+    }
+
+    // Kleinanzeigen.de login credentials
+    if (containerInput.secrets['KLEINANZEIGEN_EMAIL']) {
+      process.env['KLEINANZEIGEN_EMAIL'] = containerInput.secrets['KLEINANZEIGEN_EMAIL'];
+    }
+    if (containerInput.secrets['KLEINANZEIGEN_PASSWORD']) {
+      process.env['KLEINANZEIGEN_PASSWORD'] = containerInput.secrets['KLEINANZEIGEN_PASSWORD'];
     }
   }
 

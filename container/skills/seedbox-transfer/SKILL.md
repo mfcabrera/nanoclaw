@@ -12,12 +12,12 @@ Full end-to-end workflow: add torrent → monitor → auto-copy to NAS.
 
 ### Seedbox (ruTorrent)
 - **API**: https://rapidseedbox53414-rt.swift-013.seedbox.vip/plugins/httprpc/action.php
-- **Auth**: rapidseedbox53414 / f24f6e171427
+- **Auth**: rapidseedbox53414 / (env var `SEEDBOX_PASSWORD`)
 - **SFTP**: port 63526
 
 ### NAS (Synology Cabreletvault)
 - **Host**: Cabreletvault
-- **User**: mikkel / boxcar*MAGPIE-born2olaf
+- **User**: mikkel / (env var `NAS_PASSWORD`)
 - **rclone config**: ~/.config/rclone/rclone.conf
 - **rclone binary**: ~/rclone
 
@@ -84,7 +84,7 @@ If user gives a URL (not a magnet), use agent-browser to open the page and find 
 
 ```bash
 MAGNET="magnet:?xt=urn:btih:..."
-curl -s -u "rapidseedbox53414:f24f6e171427" \
+curl -s -u "rapidseedbox53414:$SEEDBOX_PASSWORD" \
   "https://rapidseedbox53414-rt.swift-013.seedbox.vip/plugins/httprpc/action.php" \
   --data "<?xml version=\"1.0\"?><methodCall><methodName>load.start</methodName><params><param><value><string></string></value></param><param><value><string>${MAGNET}</string></value></param></params></methodCall>" \
   -H "Content-Type: text/xml"
@@ -96,7 +96,7 @@ Success = `<i8>0</i8>` in response.
 
 ```bash
 # List all torrents and get the most recently added hash
-curl -s -u "rapidseedbox53414:f24f6e171427" \
+curl -s -u "rapidseedbox53414:$SEEDBOX_PASSWORD" \
   "https://rapidseedbox53414-rt.swift-013.seedbox.vip/plugins/httprpc/action.php" \
   --data '<?xml version="1.0"?><methodCall><methodName>download_list</methodName></methodCall>' \
   -H "Content-Type: text/xml" | grep -o '<string>[^<]*</string>' | sed 's/<[^>]*>//g'
@@ -120,7 +120,7 @@ Save to `/workspace/group/pending_torrents.json`:
 
 ```bash
 # Check if a specific torrent is complete (replace HASH)
-curl -s -u "rapidseedbox53414:f24f6e171427" \
+curl -s -u "rapidseedbox53414:$SEEDBOX_PASSWORD" \
   "https://rapidseedbox53414-rt.swift-013.seedbox.vip/plugins/httprpc/action.php" \
   --data '<?xml version="1.0"?><methodCall><methodName>d.complete</methodName><params><param><value><string>HASH</string></value></param></params></methodCall>' \
   -H "Content-Type: text/xml"
@@ -152,7 +152,7 @@ Once rclone copy completes successfully, remove the torrent from ruTorrent to fr
 
 ```bash
 # d.erase removes torrent + data files from the seedbox
-curl -s -u "rapidseedbox53414:f24f6e171427" \
+curl -s -u "rapidseedbox53414:$SEEDBOX_PASSWORD" \
   "https://rapidseedbox53414-rt.swift-013.seedbox.vip/plugins/httprpc/action.php" \
   --data '<?xml version="1.0"?><methodCall><methodName>d.erase</methodName><params><param><value><string>HASH</string></value></param></params></methodCall>' \
   -H "Content-Type: text/xml"

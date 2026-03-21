@@ -51,7 +51,10 @@ function loadConfig(): McpGatewayConfig | null {
   try {
     return JSON.parse(fs.readFileSync(MCP_GATEWAY_CONFIG_PATH, 'utf-8'));
   } catch (err) {
-    logger.error({ err, path: MCP_GATEWAY_CONFIG_PATH }, 'Failed to parse MCP gateway config');
+    logger.error(
+      { err, path: MCP_GATEWAY_CONFIG_PATH },
+      'Failed to parse MCP gateway config',
+    );
     return null;
   }
 }
@@ -112,22 +115,28 @@ function spawnSupergateway(entry: McpGatewayEntry): ChildProcess {
   const stdioCmd = stdioCmdParts.join(' ');
 
   const supergatewayPath = resolveCommand('supergateway');
-  const args = [
-    '--stdio', stdioCmd,
-    '--port', String(entry.port),
-  ];
+  const args = ['--stdio', stdioCmd, '--port', String(entry.port)];
 
   const env: Record<string, string | undefined> = { ...process.env };
   // Ensure PATH includes common Node.js install locations — supergateway
   // spawns the stdio command via a shell that inherits this PATH
-  const extraPaths = ['/usr/local/bin', '/usr/local/opt/node@22/bin', '/opt/homebrew/bin'];
+  const extraPaths = [
+    '/usr/local/bin',
+    '/usr/local/opt/node@22/bin',
+    '/opt/homebrew/bin',
+  ];
   const currentPath = env.PATH || '/usr/bin:/bin';
-  env.PATH = [...extraPaths, ...currentPath.split(':')].filter((v, i, a) => a.indexOf(v) === i).join(':');
+  env.PATH = [...extraPaths, ...currentPath.split(':')]
+    .filter((v, i, a) => a.indexOf(v) === i)
+    .join(':');
   if (entry.env) {
     Object.assign(env, entry.env);
   }
 
-  logger.info({ name: entry.name, port: entry.port, command: supergatewayPath, stdioCmd }, 'Spawning supergateway');
+  logger.info(
+    { name: entry.name, port: entry.port, command: supergatewayPath, stdioCmd },
+    'Spawning supergateway',
+  );
 
   const proc = spawn(supergatewayPath, args, {
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -166,8 +175,14 @@ function startGatewayProcess(managed: ManagedGateway): void {
     // Auto-restart with exponential backoff
     const delay = getRestartDelay(managed.restartCount);
     managed.restartCount++;
-    logger.info({ gateway: entry.name, delay, restartCount: managed.restartCount }, 'Scheduling gateway restart');
-    managed.restartTimer = setTimeout(() => startGatewayProcess(managed), delay);
+    logger.info(
+      { gateway: entry.name, delay, restartCount: managed.restartCount },
+      'Scheduling gateway restart',
+    );
+    managed.restartTimer = setTimeout(
+      () => startGatewayProcess(managed),
+      delay,
+    );
   });
 
   proc.on('error', (err) => {
@@ -209,7 +224,10 @@ export async function startMcpGateways(): Promise<void> {
 
     if (entry.type === 'stdio') {
       if (!entry.command || !entry.port) {
-        logger.error({ gateway: entry.name }, 'stdio gateway missing command or port, skipping');
+        logger.error(
+          { gateway: entry.name },
+          'stdio gateway missing command or port, skipping',
+        );
         continue;
       }
       startGatewayProcess(managed);
@@ -222,7 +240,10 @@ export async function startMcpGateways(): Promise<void> {
 
   for (const [name, managed] of managedGateways) {
     if (managed.healthy) {
-      logger.info({ gateway: name, url: getGatewayUrl(managed.entry) }, 'MCP gateway started');
+      logger.info(
+        { gateway: name, url: getGatewayUrl(managed.entry) },
+        'MCP gateway started',
+      );
     } else if (managed.entry.optional) {
       logger.warn({ gateway: name }, 'Optional MCP gateway not available');
     } else {

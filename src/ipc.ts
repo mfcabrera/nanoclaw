@@ -435,7 +435,8 @@ export async function processTaskIpc(
         // Preserve existing containerConfig when not explicitly provided,
         // so re-registration doesn't accidentally wipe mounts/mcpServers.
         const existing = deps.registeredGroups()[data.jid];
-        const mergedContainerConfig = data.containerConfig ?? existing?.containerConfig;
+        const mergedContainerConfig =
+          data.containerConfig ?? existing?.containerConfig;
         // Defense in depth: agent cannot set isMain via IPC
         deps.registerGroup(data.jid, {
           name: data.name,

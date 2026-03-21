@@ -14,13 +14,13 @@ Access Mikkel's RapidSeedbox files over SFTP.
 - **IP**: 212.7.200.73
 - **Port**: 63526 (Swift plan uses non-standard port!)
 - **Username**: rapidseedbox53414
-- **Password**: f24f6e171427
+- **Password**: (from env var `SEEDBOX_PASSWORD`)
 - **Protocol**: SFTP (SSH File Transfer Protocol)
 
 ## List Files (root directory)
 
 ```bash
-curl -s --insecure -u "rapidseedbox53414:f24f6e171427" \
+curl -s --insecure -u "rapidseedbox53414:$SEEDBOX_PASSWORD" \
   "sftp://rapidseedbox53414-rt.swift-013.seedbox.vip:63526/" \
   --connect-timeout 15
 ```
@@ -28,7 +28,7 @@ curl -s --insecure -u "rapidseedbox53414:f24f6e171427" \
 ## List Files in Subdirectory
 
 ```bash
-curl -s --insecure -u "rapidseedbox53414:f24f6e171427" \
+curl -s --insecure -u "rapidseedbox53414:$SEEDBOX_PASSWORD" \
   "sftp://rapidseedbox53414-rt.swift-013.seedbox.vip:63526/FOLDER_NAME/" \
   --connect-timeout 15
 ```
@@ -36,7 +36,7 @@ curl -s --insecure -u "rapidseedbox53414:f24f6e171427" \
 ## Download a File
 
 ```bash
-curl --insecure -u "rapidseedbox53414:f24f6e171427" \
+curl --insecure -u "rapidseedbox53414:$SEEDBOX_PASSWORD" \
   "sftp://rapidseedbox53414-rt.swift-013.seedbox.vip:63526/FOLDER/filename.mkv" \
   -o /tmp/filename.mkv \
   --connect-timeout 15
@@ -45,7 +45,7 @@ curl --insecure -u "rapidseedbox53414:f24f6e171427" \
 ## Download with Progress
 
 ```bash
-curl --insecure -u "rapidseedbox53414:f24f6e171427" \
+curl --insecure -u "rapidseedbox53414:$SEEDBOX_PASSWORD" \
   "sftp://rapidseedbox53414-rt.swift-013.seedbox.vip:63526/FOLDER/filename.mkv" \
   -o /tmp/filename.mkv \
   --progress-bar \

@@ -80,10 +80,15 @@ export async function transcribeAudioMessage(
   }
 
   try {
-    const buffer = (await downloadMediaMessage(msg, 'buffer', {}, {
-      logger: console as any,
-      reuploadRequest: sock.updateMediaMessage,
-    })) as Buffer;
+    const buffer = (await downloadMediaMessage(
+      msg,
+      'buffer',
+      {},
+      {
+        logger: console as any,
+        reuploadRequest: sock.updateMediaMessage,
+      },
+    )) as Buffer;
 
     if (!buffer || buffer.length === 0) {
       console.error('Failed to download audio message');
