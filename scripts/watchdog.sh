@@ -27,12 +27,16 @@ if ! launchctl list | grep -q 'com.nanoclaw$'; then
   exit 0
 fi
 
-# Check 2: Has the log been updated in the last 15 minutes?
+# Check 2: Has the log been updated in the last 4 hours?
+# Threshold high because quiet nights produce no log activity — the host can
+# sit perfectly healthy with zero writes for hours when no messages arrive.
+# A real freeze (no scheduler ticks, no WhatsApp keepalives) lasting 4h is
+# a strong enough signal to act on without false-positiving overnight.
 if [ -f "$LOG" ]; then
   last_mod=$(stat -f %m "$LOG")
   now=$(date +%s)
   age=$(( now - last_mod ))
-  if [ "$age" -gt 900 ]; then
+  if [ "$age" -gt 14400 ]; then
     log "RESTART: log file stale (${age}s since last write)"
     launchctl kickstart -k "$SERVICE"
     exit 0
