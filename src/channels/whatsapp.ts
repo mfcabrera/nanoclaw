@@ -2,6 +2,8 @@ import { exec } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
+import pino from 'pino';
+
 import makeWASocket, {
   Browsers,
   DisconnectReason,
@@ -30,6 +32,10 @@ import {
   RegisteredGroup,
 } from '../types.js';
 import { registerChannel, ChannelOpts } from './registry.js';
+
+// Baileys requires a pino-shaped logger (level/child/trace methods).
+// The built-in logger only covers debug/info/warn/error/fatal.
+const baileysLogger = pino({ level: 'silent' });
 
 const GROUP_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
@@ -78,10 +84,10 @@ export class WhatsAppChannel implements Channel {
       version,
       auth: {
         creds: state.creds,
-        keys: makeCacheableSignalKeyStore(state.keys, logger),
+        keys: makeCacheableSignalKeyStore(state.keys, baileysLogger),
       },
       printQRInTerminal: false,
-      logger,
+      logger: baileysLogger,
       browser: Browsers.macOS('Chrome'),
     });
 
