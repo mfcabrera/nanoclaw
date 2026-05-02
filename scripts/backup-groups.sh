@@ -20,6 +20,8 @@ BACKUP_GROUPS="$BACKUP_DIR/groups"
 BACKUP_CONFIG="$BACKUP_DIR/config"
 BACKUP_CONTAINER_SKILLS="$BACKUP_DIR/container-skills"
 BACKUP_CLAUDE_SKILLS="$BACKUP_DIR/claude-skills"
+BACKUP_SCRIPTS="$BACKUP_DIR/scripts"
+SCRIPTS_DIR="$NANOCLAW_DIR/scripts"
 
 # Also backup these config files (non-secret)
 CONFIG_FILES=(
@@ -65,6 +67,16 @@ backup() {
     done
   fi
 
+  # Backup scripts (watchdog, backup itself)
+  if [ -d "$SCRIPTS_DIR" ]; then
+    echo "Backing up scripts"
+    mkdir -p "$BACKUP_SCRIPTS"
+    rsync -a --delete --exclude='.DS_Store' "$SCRIPTS_DIR/" "$BACKUP_SCRIPTS/"
+    for script in "$SCRIPTS_DIR"/*.sh; do
+      echo "  -> script: $(basename "$script")"
+    done
+  fi
+
   # Backup config files
   for cfg in "${CONFIG_FILES[@]}"; do
     if [ -f "$cfg" ]; then
@@ -102,6 +114,17 @@ restore() {
     mkdir -p "$GROUPS_DIR/$group_name"
     rsync -a "${RSYNC_EXCLUDES[@]}" "$group_dir" "$GROUPS_DIR/$group_name/"
   done
+
+  # Restore scripts
+  if [ -d "$BACKUP_SCRIPTS" ]; then
+    echo "Restoring scripts"
+    mkdir -p "$SCRIPTS_DIR"
+    rsync -a "$BACKUP_SCRIPTS/" "$SCRIPTS_DIR/"
+    chmod +x "$SCRIPTS_DIR"/*.sh 2>/dev/null
+    for script in "$BACKUP_SCRIPTS"/*.sh; do
+      echo "  <- script: $(basename "$script")"
+    done
+  fi
 
   # Restore container skills
   if [ -d "$BACKUP_CONTAINER_SKILLS" ]; then
