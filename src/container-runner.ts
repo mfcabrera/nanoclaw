@@ -91,6 +91,9 @@ function readSecrets(): Record<string, string> {
     // Kleinanzeigen.de login
     'KLEINANZEIGEN_EMAIL',
     'KLEINANZEIGEN_PASSWORD',
+    // gogcli (Google Calendar/Gmail CLI)
+    'GOG_KEYRING_PASSWORD',
+    'GOG_ACCOUNT',
   ]);
 }
 

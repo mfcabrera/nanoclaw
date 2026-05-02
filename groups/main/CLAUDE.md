@@ -59,6 +59,49 @@ Keep messages clean and readable for WhatsApp.
 
 ---
 
+## Google Calendar & Gmail (gogcli)
+
+You have access to Google Calendar and Gmail via the `gog` CLI. Config is mounted at `/workspace/extra/gogcli-config/`.
+
+**Setup (run once per session):**
+```bash
+mkdir -p ~/.config && ln -sf /workspace/extra/gogcli-config ~/.config/gogcli
+export GOG_ENABLE_COMMANDS=calendar,gmail
+```
+
+**Two accounts available:**
+- `mfcabrera@gmail.com` — personal
+- `miguel.cabrera@platoapp.ai` — work
+
+Switch accounts with `--account` flag or `GOG_ACCOUNT` env var.
+
+**Calendar:**
+```bash
+# This week's events (all calendars, personal)
+gog calendar events --all --week
+
+# Work calendar
+gog calendar events --all --week --account miguel.cabrera@platoapp.ai
+
+# Create event on "Familiar" calendar
+gog calendar create "13eaqk6nldi0qek449okud4d5o@group.calendar.google.com" \
+  --summary "..." --from "2026-03-29 10:00" --to "2026-03-29 12:00"
+```
+
+**Gmail:**
+```bash
+# Search work email
+gog gmail search "from:someone subject:review" --max 5 --account miguel.cabrera@platoapp.ai
+
+# Read a thread
+gog gmail thread get <threadId> --account miguel.cabrera@platoapp.ai
+
+# Search personal email
+gog gmail search "from:amazon.de" --max 5 --account mfcabrera@gmail.com
+```
+
+---
+
 ## Admin Context
 
 This is the **main channel**, which has elevated privileges.
@@ -259,3 +302,27 @@ When scheduling tasks for other groups, use the `target_group_jid` parameter wit
 - `schedule_task(prompt: "...", schedule_type: "cron", schedule_value: "0 9 * * 1", target_group_jid: "120363336345536173@g.us")`
 
 The task will run in that group's context with access to their files and memory.
+
+## Weight Tracker
+
+Sheet ID: `1ODV504BxpHuW-2inn0UqOIJ66hrtVfWuPgvBy8SCpQg` (tab: `weights`)
+Account: `mfcabrera@gmail.com`
+
+Setup for each session:
+```bash
+export GOG_ENABLE_COMMANDS=calendar,gmail,sheets,drive
+GOG=/home/node/.claude/gog
+```
+
+When Mikkel says "mi peso es X" or "anota X kg" or similar:
+1. Read last row to get previous weight: `$GOG sheets get SHEET_ID "A1:C100" -a mfcabrera@gmail.com`
+2. Calculate difference (previous - new, positive = loss)
+3. Append new row: `$GOG sheets update SHEET_ID "weights!AXX:CXX" --values-json='[["DD.MM.YYYY","XX,X","diff"]]' -a mfcabrera@gmail.com`
+4. Confirm with: "✅ Anotado: DD.MM.YYYY — XX,X kg — Δ Y,Y kg"
+
+Format: German decimal comma (97,4 not 97.4). Date format: DD.MM.YYYY.
+
+When adding a new weight entry, also append a new row to the org-mode table in
+`/workspace/extra/org-notes/areas/health-sports.org` under the `* Weight Log` section,
+and update the summary line at the top with the new current weight and total lost.
+Then call `mcp__emacs-tools__revertOrgBuffers` to sync Emacs.

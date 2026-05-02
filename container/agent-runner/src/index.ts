@@ -714,6 +714,15 @@ async function main(): Promise<void> {
     if (containerInput.secrets['KLEINANZEIGEN_PASSWORD']) {
       process.env['KLEINANZEIGEN_PASSWORD'] = containerInput.secrets['KLEINANZEIGEN_PASSWORD'];
     }
+
+    // gogcli (Google Calendar/Gmail)
+    if (containerInput.secrets['GOG_KEYRING_PASSWORD']) {
+      process.env['GOG_KEYRING_PASSWORD'] = containerInput.secrets['GOG_KEYRING_PASSWORD'];
+      process.env['GOG_KEYRING_BACKEND'] = 'file';
+    }
+    if (containerInput.secrets['GOG_ACCOUNT']) {
+      process.env['GOG_ACCOUNT'] = containerInput.secrets['GOG_ACCOUNT'];
+    }
   }
 
   // Build SDK env: merge secrets into process.env for the SDK only.
