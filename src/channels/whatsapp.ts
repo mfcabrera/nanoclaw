@@ -224,12 +224,17 @@ export class WhatsAppChannel implements Channel {
 
     this.sock.ev.on('creds.update', saveCreds);
 
-    this.sock.ev.on('chats.phoneNumberShare', ({ lid, jid }) => {
-      const lidUser = lid?.split('@')[0].split(':')[0];
-      if (lidUser && jid) {
-        this.setLidPhoneMapping(lidUser, jid);
-      }
-    });
+    // Baileys 7-rc.9 doesn't have `chats.phoneNumberShare` in its typed event map.
+    // Keep the handler for forward-compat (will fire on 6.x, no-op on 7.x via runtime check).
+    (this.sock.ev as unknown as { on: (e: string, cb: (data: { lid?: string; jid?: string }) => void) => void }).on(
+      'chats.phoneNumberShare',
+      ({ lid, jid }) => {
+        const lidUser = lid?.split('@')[0].split(':')[0];
+        if (lidUser && jid) {
+          this.setLidPhoneMapping(lidUser, jid);
+        }
+      },
+    );
 
     this.sock.ev.on('messages.upsert', async ({ messages }) => {
       for (const msg of messages) {
